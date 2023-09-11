@@ -1,0 +1,110 @@
+---
+title: "Regression"
+author: "Ahmad Mirzanezhad"
+date: "2023-01-13"
+output: html_document
+---
+  
+```{r,warning = FALSE, message = FALSE}
+require(dplyr)
+require(tidyverse)
+require(ggplot2)
+require(datasets)
+require(readr)
+library(caret)
+library(splines)
+library(splines2)
+library(mgcv)
+library(vctrs)
+library(gratia)
+df = read.csv("D:/EXETER/Exams-20230720T014746Z-001/Exams/MTHM503/weight_height.csv")
+```
+
+To begin with, we start with a simple graph
+
+
+```{r}
+
+    df %>% 
+  pivot_longer(-c(weight, male)) %>%
+  ggplot(aes(x = value, y = weight, color=factor(male))) + 
+  geom_point() + 
+  geom_smooth(method = 'lm', formula = y ~ x ,se= FALSE)+
+  guides(color = guide_legend(title = "Male"))+
+  facet_wrap(~name, scales = 'free')
+       
+
+  
+```
+
+the graph obviously shows that the relationship between variables and "weight" is not
+linear. Also, there is a difference between male and female in "weight" VS height and age.
+So I will not use linear regression to predict the model. In this case, two column will be added to our "dataframe" to see the effect of gender.
+## first attempt: 
+
+```{r}
+df_sex_effect = mutate(df , male_height = male* height, male_age = male * age) 
+model_sex_effect <- lm(weight ~ poly(height, 2, raw=TRUE)+poly(age, 2, raw = TRUE)+ male_height + male_age,data = df_sex_effect)
+summary(model_sex_effect)
+```
+Residual
+
+```{r}
+ggplot(model_sex_effect, aes(x = .fitted, y = .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0)+
+  geom_smooth()+
+  labs(title='Residual vs. Fitted Values Plot', x='Fitted Values', y='Residuals')
+
+```
+
+There is a pattern in residual plot. On the other hand, two new variables are not 
+significant. Therefor,we will not continue with those two new variables in our model. 
+
+```{r}
+set.seed(123)
+sample_id <- df$weight %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+train_data <- df[sample_id, ]
+test_data <- df[-sample_id, ]
+```
+
+Now. we fit a spline model. Due to limitation,, we only show the prediction performance and ignore the plot.
+Two breaking point are recognized in the first graph
+
+```{r}
+knot_age <- c(5,25)
+knot_height <- c(70,137)
+spline_model <- lm (weight ~ bSpline(height, knots = knot_height)+bSpline(age, knots = knot_age),
+                       data = train_data)
+# Make predictions
+spline_predictions <- spline_model %>% predict(test_data)
+# Model performance
+spline_model_performance <- data.frame(
+  RMSE = RMSE(spline_predictions, test_data$weight),
+  R2 = R2(spline_predictions, test_data$weight)
+)
+summary(spline_model)
+spline_model_performance
+```
+
+
+Finally a GAM model will be fitted to our data
+```{r}
+gam_model <- gam(weight~s(height) + s(age), data = train_data)
+predictions_gam <- gam_model %>% predict(test_data)
+# Model performance
+gam_model_performance <- data.frame(
+RMSE = RMSE(predictions_gam, test_data$weight),
+R2 = R2(predictions_gam, test_data$weight)
+)
+summary(gam_model)
+gam_model_performance
+draw(gam_model, residuals = TRUE)
+
+```
+
+
+The above graph demonestrare that Our model predicts the height properly but, can not fit well the age parameter.
+GAM and Spline model approximately give the same result.GAM model presents less RMSE than Spline model(about0.04).
+both give the r2=0.94. If we divide the data into more knots in Spline model, we may get the same result.
